@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>مولّد مشروع ParentLock</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+body{font-family:Tahoma;text-align:center;padding:60px 20px;background:#f0f2f5}
+button{background:#0066cc;color:white;padding:24px 60px;font-size:22px;border:none;border-radius:12px;cursor:pointer;font-weight:bold}
+button:disabled{background:#999}
+#msg{margin-top:30px;font-size:16px;color:#666}
+</style>
+</head>
+<body>
+<h1>📦 مولّد مشروع ParentLock</h1>
+<p>اضغط الزر لتحميل كل ملفات المشروع</p>
+<button id="btn" onclick="generate()">⬇️ تحميل ملفات المشروع</button>
+<div id="msg"></div>
+
+<script>
+const FILES = {
+"settings.gradle": `pluginManagement{repositories{google();mavenCentral();gradlePluginPortal()}}
+dependencyResolutionManagement{repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS);repositories{google();mavenCentral()}}
+rootProject.name="ParentLock"
+include ':app'
+`,
+
+"build.gradle": `plugins {
+    id 'com.android.application' version '8.1.0' apply false
+    id 'org.jetbrains.kotlin.android' version '1.9.0' apply false
+    id 'com.google.gms.google-services' version '4.4.0' apply false
+}
+`,
+
+"app/build.gradle": `plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.gms.google-services'
+}
+android {
+    namespace 'com.example.parentlock'
+    compileSdk 34
+    defaultConfig {
+        applicationId "com.example.parentlock"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+}
+dependencies {
+    implementation platform('com.google.firebase:firebase-bom:32.7.0')
+    implementation 'com.google.firebase:firebase-firestore-ktx'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.core:core-ktx:1.12.0'
+}
+`,
+
+"app/google-services.json": `{"_NOTE":"استبدل هذا الملف بالملف الحقيقي من Firebase"}`,
+
+"app/src/main/AndroidManifest.xml": `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <application android:allowBackup="false" android:label="حماية الطفل"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".LockActivity" android:exported="false"
+            android:excludeFromRecents="true" android:launchMode="singleInstance"
+            android:showOnLockScreen="true" android:turnScreenOn="true" />
+        <receiver android:name=".AdminReceiver"
+            android:permission="android.permission.BIND_DEVICE_ADMIN" android:exported="true">
+            <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin" />
+            <intent-filter><action android:name="android.app.action.DEVICE_ADMIN_ENABLED" /></intent-filter>
+        </receiver>
+        <receiver android:name=".BootReceiver" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        </receiver>
+    </application>
+</manifest>
+`,
+
+"app/src/main/res/xml/device_admin.xml": `<?xml version="1.0" encoding="utf-8"?>
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies><force-lock /><reset-password /></uses-policies>
+</device-admin>
+`,
+
+"app/src/main/java/com/example/parentlock/Main.kt": `package com.example.parentlock
+
+import android.app.admin.DeviceAdminReceiver
+import android.app.admin.DevicePolicyManager
+import android.content.*
+import android.graphics.Color
+import android.os.*
+import android.view.Gravity
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.webkit.*
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+
+class AdminReceiver : DeviceAdminReceiver() {
+    override fun onEnabled(c: Context, i: Intent) = Toast.makeText(c, "تم التفعيل", Toast.LENGTH_SHORT).show()
+    override fun onDisableRequested(c: Context, i: Intent) = "إلغاء التفعيل سيعطل الحماية"
+}
+
+class BootReceiver : BroadcastReceiver() {
+    override fun onReceive(c: Context, i: Intent) {
+        if (i.action == Intent.ACTION_BOOT_COMPLETED &&
+            c.getSharedPreferences("app", 0).getBoolean("isLocked", false)) {
+            c.startActivity(Intent(c, LockActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+        }
+    }
+}
+
+class MainActivity : AppCompatActivity() {
+    private lateinit var web: WebView
+    private lateinit var dpm: DevicePolicyManager
+    private lateinit var admin: ComponentName
+
+    override fun onCreate(b: Bundle?) {
+        super.onCreate(b)
+        dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        admin = ComponentName(this, AdminReceiver::class.java)
+        web = WebView(this)
+        web.settings.javaScriptEnabled = true
+        web.settings.domStorageEnabled = true
+        web.settings.allowFileAccess = true
+        web.addJavascriptInterface(Bridge(), "AndroidBridge")
+        web.loadUrl("file:///android_asset/index.html")
+        setContentView(web)
+        if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        if (getSharedPreferences("app", 0).getBoolean("isLocked", false))
+            startActivity(Intent(this, LockActivity::class.java))
+    }
+
+    inner class Bridge {
+        @JavascriptInterface fun setPairCode(code: String) =
+            getSharedPreferences("app", 0).edit().putString("pairCode", code).apply()
+        @JavascriptInterface fun startService() {}
+        @JavascriptInterface fun hasAdmin(): Boolean = dpm.isAdminActive(admin)
+        @JavascriptInterface fun requestAdmin() = runOnUiThread {
+            startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
+            })
+        }
+        @JavascriptInterface fun lockDevice() = runOnUiThread {
+            getSharedPreferences("app", 0).edit().putBoolean("isLocked", true).apply()
+            if (!dpm.isAdminActive(admin)) requestAdmin()
+            else try { dpm.lockNow() } catch (_: Exception) {}
+            startActivity(Intent(this@MainActivity, LockActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            })
+        }
+        @JavascriptInterface fun unlockDevice() = runOnUiThread {
+            getSharedPreferences("app", 0).edit().putBoolean("isLocked", false).apply()
+            sendBroadcast(Intent("com.example.parentlock.CLOSE_LOCK"))
+        }
+    }
+}
+
+class LockActivity : AppCompatActivity() {
+    private val rec = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            if (i?.action == "com.example.parentlock.CLOSE_LOCK") finishAndRemoveTask()
+        }
+    }
+    override fun onCreate(b: Bundle?) {
+        super.onCreate(b)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true); setTurnScreenOn(true)
+        } else @Suppress("DEPRECATION") window.addFlags(
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK); gravity = Gravity.CENTER
+            layoutParams = ViewGroup.LayoutParams(-1, -1)
+        }
+        root.addView(TextView(this).apply {
+            text = "لقد قفل شخص مجهول جهازك"; setTextColor(Color.WHITE); textSize = 26f; gravity = Gravity.CENTER
+        })
+        root.addView(TextView(this).apply {
+            text = "\\n\\nهذا الجهاز محمي بواسطة إدارة الوالدين"
+            setTextColor(Color.parseColor("#666666")); textSize = 14f; gravity = Gravity.CENTER
+        })
+        setContentView(root)
+        val f = IntentFilter("com.example.parentlock.CLOSE_LOCK")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            registerReceiver(rec, f, Context.RECEIVER_NOT_EXPORTED)
+        else @Suppress("UnspecifiedRegisterReceiverFlag") registerReceiver(rec, f)
+    }
+    @Deprecated("Deprecated in Java") override fun onBackPressed() {}
+    override fun onDestroy() {
+        try { unregisterReceiver(rec) } catch (_: Exception) {}
+        super.onDestroy()
+    }
+}
+`,
+
+"app/src/main/assets/index.html": `<!DOCTYPE html>
+<html dir="rtl"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>حماية الطفل</title>
+<style>body{font-family:Tahoma;background:#f0f2f5;padding:20px;max-width:500px;margin:0 auto}
+.card{background:#fff;padding:24px;border-radius:16px;margin-bottom:16px;box-shadow:0 4px 20px rgba(0,0,0,.08)}
+h1{font-size:22px;margin-bottom:20px;text-align:center}
+button{width:100%;padding:16px;font-size:16px;border:none;border-radius:12px;cursor:pointer;margin-bottom:10px;font-weight:bold;font-family:inherit}
+.p{background:#0066cc;color:#fff}.d{background:#e74c3c;color:#fff;padding:22px;font-size:18px}
+.s{background:#27ae60;color:#fff;padding:22px;font-size:18px}.x{background:#e9ecef;color:#333}
+input{width:100%;padding:16px;font-size:24px;text-align:center;border:2px solid #ddd;border-radius:12px;font-family:monospace;letter-spacing:6px;margin-bottom:14px}
+#lockOverlay{position:fixed;inset:0;background:#000;color:#fff;z-index:9999;display:none;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:40px 20px}
+#lockOverlay .msg{font-size:26px;font-weight:bold;margin-bottom:20px}
+#lockOverlay .sub{font-size:15px;color:#666}
+.hidden{display:none!important}</style></head>
+<body>
+
+<div id="select">
+<div class="card">
+<h1>🛡️ حماية الطفل</h1>
+<p style="text-align:center;color:#666;margin-bottom:20px">اختر دور هذا الجهاز</p>
+<button class="p" onclick="mode('parent')">👨‍👩‍👧 أنا الوالد</button>
+<button class="x" onclick="mode('child')">📱 جهاز الطفل</button>
+</div></div>
+
+<div id="parent" class="hidden">
+<div class="card">
+<h1>لوحة الوالد</h1>
+<div id="codeBox" style="text-align:center;font-size:40px;font-family:monospace;color:#0066cc;padding:16px;background:#f0f7ff;border-radius:12px;margin:16px 0">——————</div>
+<button class="p" onclick="genCode()">➕ إضافة جهاز</button>
+<div id="ctrls" class="hidden" style="margin-top:20px">
+<button class="d" onclick="send('LOCK')">🔒 قفل</button>
+<button class="s" onclick="send('UNLOCK')">🔓 فتح</button>
+</div>
+</div></div>
+
+<div id="child" class="hidden">
+<div class="card">
+<h1>جهاز الطفل</h1>
+<input id="inp" type="tel" inputmode="numeric" maxlength="6" placeholder="000000">
+<button class="p" onclick="pair()">🔗 ربط</button>
+<div id="st" style="text-align:center;color:#666;margin-top:16px">—</div>
+</div></div>
+
+<div id="lockOverlay">
+<div style="font-size:80px;margin-bottom:30px">🔒</div>
+<div class="msg">لقد قفل شخص مجهول جهازك</div>
+<div class="sub">هذا الجهاز محمي بواسطة إدارة الوالدين</div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const show=id=>['select','parent','child'].forEach(x=>$(x).classList.add('hidden')),$(id).classList.remove('hidden');
+function mode(m){localStorage.setItem('mode',m);show(m);if(m==='parent')load();}
+let cur=null;
+function genCode(){const c=String(Math.floor(100000+Math.random()*900000));
+localStorage.setItem('d_'+c,JSON.stringify({paired:false,locked:false}));
+cur=c;$('codeBox').textContent=c;$('ctrls').classList.remove('hidden');}
+function load(){const m=localStorage.getItem('mode');if(m)show(m);}
+function send(t){if(!cur)return;const d=JSON.parse(localStorage.getItem('d_'+cur)||'{}');d.locked=(t==='LOCK');localStorage.setItem('d_'+cur,JSON.stringify(d));alert(t==='LOCK'?'🔒 تم':'🔓 تم');}
+function pair(){const c=$('inp').value.trim();if(c.length!==6)return alert('6 أرقام');
+localStorage.setItem('d_'+c,JSON.stringify({paired:true,locked:false}));localStorage.setItem('childCode',c);
+if(window.AndroidBridge){AndroidBridge.setPairCode(c);if(!AndroidBridge.hasAdmin())AndroidBridge.requestAdmin();}
+$('st').textContent='✅ تم الربط: '+c;}
+function applyLock(){if(window.AndroidBridge)return AndroidBridge.lockDevice();$('lockOverlay').style.display='flex';}
+function removeLock(){if(window.AndroidBridge)return AndroidBridge.unlockDevice();$('lockOverlay').style.display='none';}
+setInterval(()=>{const c=localStorage.getItem('childCode');if(!c)return;
+const d=JSON.parse(localStorage.getItem('d_'+c)||'{}');if(d.locked)$('lockOverlay').style.display='flex';else $('lockOverlay').style.display='none';},1500);
+load();
+</script>
+</body></html>
+`,
+
+".github/workflows/build.yml": `name: Build APK
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Make gradlew executable
+        run: |
+          if [ -f gradlew ]; then chmod +x gradlew; else
+            echo "gradlew not found - creating from gradle wrapper"
+            gradle wrapper --gradle-version 8.4
+          fi
+      - name: Build
+        run: ./gradlew assembleDebug
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+`,
+
+"gradle/wrapper/gradle-wrapper.properties": `distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\\://services.gradle.org/distributions/gradle-8.4-bin.zip
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+`
+};
+
+async function generate() {
+  const btn = document.getElementById('btn');
+  const msg = document.getElementById('msg');
+  btn.disabled = true;
+  msg.textContent = '⏳ جاري التجهيز...';
+
+  const zip = new JSZip();
+  for (const [path, content] of Object.entries(FILES)) {
+    zip.file(path, content);
+  }
+
+  // أضف gradlew يدويًا
+  zip.file("gradlew", "#!/bin/sh\n");
+
+  const blob = await zip.generateAsync({type:"blob"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "ParentLock.zip";
+  a.click();
+  URL.revokeObjectURL(url);
+
+  msg.textContent = "✅ تم التحميل! الآن ارفع محتوى ZIP إلى GitHub";
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>
